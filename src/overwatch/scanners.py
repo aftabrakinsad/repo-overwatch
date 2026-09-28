@@ -142,7 +142,7 @@ def _cvss_to_severity(score: float) -> str:
     return "low" if score > 0 else "medium"
 
 
-def osv(cfg: Config) -> tuple[list[Finding], str]:
+def osv(cfg: Config, all_paths: list[str] | None = None) -> tuple[list[Finding], str]:
     if not shutil.which("osv-scanner"):
         return [], "skipped (not installed)"
     try:
@@ -158,9 +158,12 @@ def osv(cfg: Config) -> tuple[list[Finding], str]:
     except json.JSONDecodeError:
         return [], "error (unreadable output)"
 
+    tracked = set(all_paths) if all_paths is not None else None
     findings = []
     for result in data.get("results") or []:
         source = _relpath(str((result.get("source") or {}).get("path", "")), cfg.workspace)
+        if tracked is not None and source not in tracked:
+            continue  # e.g. node_modules, or a checked-out copy of this tool
         for pkg in result.get("packages") or []:
             info = pkg.get("package") or {}
             vulns = pkg.get("vulnerabilities") or []
@@ -215,6 +218,6 @@ def run_all(cfg: Config, files: dict[str, FileInfo], all_paths: list[str]) -> tu
     """Returns (candidates for AI verification, deterministic findings, tool status)."""
     semgrep_findings, s1 = semgrep(cfg, files)
     secret_findings, s2 = gitleaks(cfg, all_paths)
-    dep_findings, s3 = osv(cfg)
+    dep_findings, s3 = osv(cfg, all_paths)
     status = {"Semgrep": s1, "Gitleaks": s2, "OSV-Scanner": s3}
     return semgrep_findings, secret_findings + dep_findings, status

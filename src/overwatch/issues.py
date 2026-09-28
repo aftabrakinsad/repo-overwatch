@@ -135,7 +135,7 @@ def sync(cfg: Config, gh: GitHub, findings: list[Finding], present: set[str], sc
         for fp, issue in existing.items():
             if issue["state"] != "open" or fp in present or IGNORE_LABEL in _labels_of(issue):
                 continue
-            gh.comment(issue["number"], f"Repo Overwatch no longer detects this problem on `{cfg.branch}` (commit `{cfg.short_sha}`). Closing as fixed.")
+            gh.comment(issue["number"], f"Repo Overwatch no longer detects this problem on `{cfg.branch}` (commit `{cfg.short_sha}`): the code was fixed or removed, or the file is now excluded from scans. Closing.")
             gh.update_issue(issue["number"], state="closed", state_reason="completed")
             result.closed.append(issue["number"])
     elif not cfg.is_default_branch:

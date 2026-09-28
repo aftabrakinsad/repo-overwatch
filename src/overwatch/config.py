@@ -126,6 +126,22 @@ class Config:
         return url
 
 
+def own_files(workspace: Path, config_file: Path) -> list[str]:
+    """Overwatch's own files in the scanned repository, which it should not review:
+    the workflow file that started this run (from GITHUB_WORKFLOW_REF, e.g.
+    "owner/repo/.github/workflows/overwatch.yml@refs/heads/main") and the config file."""
+    paths = []
+    match = re.match(r"^[^/]+/[^/]+/(.+?)@", _env("GITHUB_WORKFLOW_REF"))
+    if match:
+        paths.append(match.group(1))
+    try:
+        paths.append(config_file.resolve().relative_to(workspace).as_posix())
+    except ValueError:
+        pass
+    # Leading "/" anchors each pattern to that exact file (gitignore syntax).
+    return ["/" + p for p in paths]
+
+
 def load(workspace: Path, dry_run: bool | None = None, config_path: str | None = None) -> Config:
     ws = workspace.resolve()
 
@@ -231,7 +247,7 @@ def load(workspace: Path, dry_run: bool | None = None, config_path: str | None =
         max_new_issues=_int(setting("max_new_issues", "OVERWATCH_MAX_NEW_ISSUES", 20), 20),
         min_severity=min_severity,
         fail_on=fail_on,
-        exclude=_str_list(file_cfg.get("exclude")),
+        exclude=_str_list(file_cfg.get("exclude")) + own_files(ws, cfg_file),
         include=_str_list(file_cfg.get("include")),
         docs=_str_list(file_cfg.get("docs")),
         validate=_str_list(file_cfg.get("validate")),

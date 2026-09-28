@@ -303,8 +303,9 @@ def test_osv_output_parsing(tmp_path, monkeypatch):
 
     monkeypatch.setattr(scanners.shutil, "which", lambda name: "/bin/" + name)
     monkeypatch.setattr(scanners, "_run", lambda *a, **k: Proc())
-    findings, status = scanners.osv(cfg)
+    findings, status = scanners.osv(cfg, ["package-lock.json"])
     assert status.startswith("ran")
+    assert scanners.osv(cfg, ["other.txt"])[0] == []  # untracked lockfiles are ignored
     [f] = findings
     assert (f.path, f.severity, f.category) == ("package-lock.json", "high", "dependency")
     assert "4.17.21" in f.suggested_change and f.verified
@@ -526,3 +527,42 @@ def test_rate_limiter_backoff_waits_only_as_long_as_asked():
     limiter.block(5)  # a 429 said "retry in 5s"
     limiter.acquire(10)
     assert 5 <= sum(slept) < 7
+
+
+def test_private_tool_checked_out_inside_workspace_is_ignored(tmp_path, monkeypatch):
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    ws = make_repo(tmp_path / "repo", SAMPLE)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=ws, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "main"], cwd=ws, check=True)
+    # Simulate the workflow's "Download the private Repo Overwatch tool" step.
+    make_repo(ws / ".overwatch-action", {"action.yml": "name: x\n", "src/overwatch/tool.py": "import os\n",
+                                         "requirements.txt": "requests==2.0.0\n"})
+
+    cfg = load_cfg(ws, monkeypatch)
+    files, _, _ = repo.collect(cfg)
+    assert not any(p.startswith(".overwatch-action") for p in files)
+
+    cfg.dry_run = False
+    gh = FakePRGitHub()
+    assert pipeline.main(cfg, gemini=FakeGemini(), claude=FakeClaude(), gh=gh) == 0
+    report_md = (cfg.output_dir / "overwatch-report.md").read_text()
+    assert ".overwatch-action" not in report_md
+    [pr] = gh.prs
+    changed = subprocess.run(["git", "--git-dir", str(remote), "diff", "--name-only", "main", "overwatch/fixes-main"],
+                             capture_output=True, text=True, check=True).stdout.split()
+    assert changed == ["src/lib/math.ts"]
+    assert (ws / ".overwatch-action" / "action.yml").exists()  # the tool is left intact
+
+
+def test_overwatch_skips_its_own_workflow_and_config(tmp_path, monkeypatch):
+    files = dict(SAMPLE)
+    files[".github/workflows/overwatch.yml"] = "name: Repo Overwatch\n"
+    files[".github/workflows/ci.yml"] = "name: CI\n"
+    ws = make_repo(tmp_path / "repo", files)
+    cfg = load_cfg(ws, monkeypatch,
+                   GITHUB_WORKFLOW_REF="someone/app/.github/workflows/overwatch.yml@refs/heads/master")
+    analyzed, _, _ = repo.collect(cfg)
+    assert ".github/workflows/overwatch.yml" not in analyzed  # the workflow that runs Overwatch
+    assert ".overwatch.yml" not in analyzed                   # Overwatch's own config
+    assert ".github/workflows/ci.yml" in analyzed             # your other workflows are still checked

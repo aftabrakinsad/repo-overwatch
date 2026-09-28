@@ -1,0 +1,133 @@
+# VARIANT for keeping repo-overwatch PRIVATE while scanning a PUBLIC repository.
+# GitHub does not let public repositories `uses:` an action from a private repository, so this
+# workflow downloads the tool with a read-only token and runs it as a local action.
+# Needs one extra secret in the scanned repository: OVERWATCH_ACTION_TOKEN (see README).
+#
+# Copy this file to .github/workflows/overwatch.yml in the repository you want watched,
+# and make sure it is on the DEFAULT branch (comment commands only work from there).
+# Replace YOUR-GITHUB-USERNAME below (one place) with the account that owns repo-overwatch.
+#
+# Overwatch runs ONLY when you ask for it:
+#   - Comment on an issue:          run overwatch              (scans the default branch)
+#   - Comment on an issue:          run overwatch on my-branch (scans my-branch)
+#   - Comment on a pull request:    run overwatch              (scans the pull request's branch)
+#   - Commit message containing:    [run overwatch]            (scans the pushed branch)
+#   - Actions tab → Repo Overwatch → Run workflow              (pick any branch)
+# Only the repository owner, organization members and collaborators can trigger it.
+name: Repo Overwatch
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to scan (leave empty to use the branch selected above)"
+        required: false
+        default: ""
+  push:
+    branches-ignore:
+      - "overwatch/**"
+
+permissions:
+  contents: write        # push the fix branch
+  issues: write          # open and update finding issues, reply to your command
+  pull-requests: write   # open the fix pull request
+
+concurrency:
+  # Queue repeated commands instead of cancelling a scan that is already paid for.
+  group: overwatch-${{ github.event.issue.number || inputs.branch || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  overwatch:
+    # Jobs that don't match are skipped instantly: no runner minutes and no AI cost.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[run overwatch]')) ||
+      (github.event_name == 'issue_comment' &&
+       startsWith(github.event.comment.body, 'run overwatch') &&
+       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Work out which branch to scan
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          INPUT_BRANCH: ${{ inputs.branch }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          PR_API_URL: ${{ github.event.issue.pull_request.url }}
+        run: |
+          branch="$REF_NAME"
+          if [ "$EVENT" = "workflow_dispatch" ] && [ -n "$INPUT_BRANCH" ]; then
+            branch="$INPUT_BRANCH"
+          fi
+          if [ "$EVENT" = "issue_comment" ]; then
+            # 👀 reaction = "command received".
+            gh api --method POST "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes > /dev/null || true
+            if [ -n "$PR_API_URL" ]; then
+              pr="$(gh api "$PR_API_URL")"
+              if [ "$(jq -r '.head.repo.full_name' <<< "$pr")" != "$REPO" ]; then
+                echo "::error::For safety, Overwatch does not run on pull requests from forks."
+                exit 1
+              fi
+              branch="$(jq -r '.head.ref' <<< "$pr")"
+            else
+              requested="$(printf '%s\n' "$COMMENT_BODY" | head -n 1 | tr -d '\r' \
+                | sed -nE 's/^run overwatch[[:space:]]+on[[:space:]]+([^[:space:]]+).*/\1/Ip')"
+              branch="${requested:-$DEFAULT_BRANCH}"
+            fi
+          fi
+          case "$branch" in
+            overwatch/*) echo "::error::Overwatch does not scan its own fix branches."; exit 1 ;;
+          esac
+          echo "Scanning branch: $branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.target.outputs.branch }}
+
+      # Optional: set up the toolchain your `validate:` commands need, for example:
+      # - uses: actions/setup-node@v6
+      #   with:
+      #     node-version: 22
+
+      - name: Download the private Repo Overwatch tool
+        uses: actions/checkout@v6
+        with:
+          repository: YOUR-GITHUB-USERNAME/repo-overwatch
+          ref: v1
+          token: ${{ secrets.OVERWATCH_ACTION_TOKEN }}
+          path: .overwatch-action
+          persist-credentials: false   # the token is used for this download only
+
+      - uses: ./.overwatch-action
+        with:
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          # Optional: add an ANTHROPIC_API_KEY secret and uncomment to let Claude verify findings.
+          # anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          branch: ${{ steps.target.outputs.branch }}
+          # Optional settings (defaults shown):
+          # gemini-model: gemini-3.5-flash-lite
+          gemini-rpm: 10            # stay under your free-tier requests per minute
+          max-ai-requests: 100      # per scan; the next scan continues where this one stopped
+          # min-severity: low
+          # max-new-issues: 20
+          # fail-on: none
+
+      - name: Tell the requester that the scan failed
+        if: failure() && github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$NUMBER" --repo "$REPO" --body "Repo Overwatch could not complete this scan. Details: $RUN_URL"
