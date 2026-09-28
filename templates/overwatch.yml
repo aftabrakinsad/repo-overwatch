@@ -1,4 +1,4 @@
-# Copy this file to .github/workflows/overwatch.yml in any repository you want watched,
+# Copy this file to .github/workflows/overwatch.yml in any repository that needed to be watched,
 # and make sure it is on the DEFAULT branch (comment commands only work from there).
 # Replace YOUR-GITHUB-USERNAME below with the account that owns the repo-overwatch action.
 #
@@ -94,7 +94,7 @@ jobs:
       #   with:
       #     node-version: 22
 
-      - uses: YOUR-GITHUB-USERNAME/repo-overwatch@v1
+      - uses: aftabrakinsad/repo-overwatch@v1
         with:
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
           # Optional: add an ANTHROPIC_API_KEY secret and uncomment to let Claude verify findings.
@@ -102,8 +102,8 @@ jobs:
           branch: ${{ steps.target.outputs.branch }}
           # Optional settings (defaults shown):
           # gemini-model: gemini-3.5-flash-lite
-          # gemini-rpm: 10            # stay under your free-tier requests per minute
-          # max-ai-requests: 100      # per scan; the next scan continues where this one stopped
+          gemini-rpm: 10            # stay under your free-tier requests per minute
+          max-ai-requests: 100      # per scan; the next scan continues where this one stopped
           # min-severity: low
           # max-new-issues: 20
           # fail-on: none
