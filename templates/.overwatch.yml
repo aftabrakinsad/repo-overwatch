@@ -40,9 +40,9 @@ fix_pr:
 # gemini_verify_model: ""               # e.g. gemini-3.5-flash for a stronger second pass, if your quota allows
 # verifier: auto                        # auto | gemini | claude (claude needs anthropic-api-key)
 # claude_model: claude-sonnet-5
-# gemini_rpm: 10                        # requests per minute per model; keep below your quota
+gemini_rpm: 10                        # requests per minute per model; keep below your quota
 # gemini_tpm: 200000                    # tokens per minute per model (estimated)
-# max_ai_requests: 100                  # per scan; a scan that hits this resumes on the next command
+max_ai_requests: 100                  # per scan; a scan that hits this resumes on the next command
 
 # Limits.
 max_file_bytes: 200000   # skip larger files

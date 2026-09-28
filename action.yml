@@ -1,6 +1,6 @@
 name: "Repo Overwatch"
 description: "AI repository watchdog: Gemini analyzes, a verifier (Gemini or Claude) double-checks, and findings become a report, issues and a fix pull request."
-author: "your-username"
+author: "Rakin Sad Aftab"
 branding:
   icon: "eye"
   color: "purple"

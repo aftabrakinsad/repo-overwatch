@@ -47,8 +47,8 @@ jobs:
           # anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Optional settings (defaults shown):
           # gemini-model: gemini-3.5-flash-lite
-          # gemini-rpm: 10            # stay under your free-tier requests per minute
-          # max-ai-requests: 100      # per scan; the next scan continues where this one stopped
+          gemini-rpm: 10            # stay under your free-tier requests per minute
+          max-ai-requests: 100      # per scan; the next scan continues where this one stopped
           # min-severity: low
           # max-new-issues: 20
           # fail-on: none
