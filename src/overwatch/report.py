@@ -17,6 +17,7 @@ SOURCE_LABEL = {
     "gitleaks": "Gitleaks secret scan",
     "osv": "OSV-Scanner dependency audit",
     "links": "Documentation link checker",
+    "markdown": "Markdown checker",
 }
 
 

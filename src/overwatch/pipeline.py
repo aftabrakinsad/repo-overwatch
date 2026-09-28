@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 
-from . import analyzer, depgraph, fixer, issues, repo, report, scanners, verifier
+from . import analyzer, depgraph, doclint, fixer, issues, repo, report, scanners, verifier
 from .cache import Cache
 from .config import Config
 from .github_client import GitHub
@@ -82,6 +82,7 @@ def main(cfg: Config, gemini=None, claude=None, gh: GitHub | None = None) -> int
     with log.group("Running deterministic scanners"):
         semgrep_candidates, deterministic, summary.tool_status = scanners.run_all(cfg, files, all_paths)
         deterministic += depgraph.broken_links(files, all_paths)
+        deterministic += doclint.check(files)
         for tool, status in summary.tool_status.items():
             log.info(f"{tool}: {status}")
 

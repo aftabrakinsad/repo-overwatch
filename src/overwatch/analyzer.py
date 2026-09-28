@@ -14,7 +14,7 @@ from .models import CATEGORIES, FileInfo, Finding, norm_category, norm_severity
 from .repo import is_manifest, numbered, outline
 
 PROMPT_VERSION = "code-1"
-DOCS_PROMPT_VERSION = "docs-1"
+DOCS_PROMPT_VERSION = "docs-2"
 
 CODE_SYSTEM = f"""You are Overwatch, a meticulous senior software engineer auditing a repository.
 Find real, actionable problems in the files you are given. Categories:
@@ -43,10 +43,15 @@ Respond with JSON only, in exactly this shape:
 {{"findings": [{{"path": "src/app.ts", "start_line": 10, "end_line": 14, "category": "bug", "severity": "high", "title": "Short summary (max 12 words)", "description": "What is wrong and why, 1-4 sentences", "related_files": ["src/other.ts"]}}]}}
 Return {{"findings": []}} when a batch has no real problems."""
 
-DOCS_SYSTEM = """You are Overwatch, auditing whether a repository's documentation still matches its code.
-You receive documentation files, package manifests, and an outline of the code (top-level declarations with line numbers).
+DOCS_SYSTEM = """You are Overwatch, auditing a repository's documentation. You receive documentation files, package manifests, and an outline of the code (top-level declarations with line numbers; it may be empty).
 
-Report doc-drift only where you can see a concrete mismatch, for example:
+A. Broken documentation (category "broken-code"): mistakes that make a page render or work incorrectly, for example
+- malformed HTML inside Markdown (a tag without a name, unclosed or mismatched tags, broken attributes or quotes)
+- malformed Markdown: unclosed code blocks, broken image/link syntax, tables whose rows don't match the header
+- image, badge or link URLs that are clearly malformed (not merely external links you cannot check)
+- badges or statements that are hardcoded to claim something the repository cannot back up (e.g. a static "tests passing" badge in a repository without tests)
+
+B. Doc-drift (category "doc-drift"): the docs no longer match the code. Report only concrete mismatches, for example:
 - documented functions, classes, CLI commands, flags, options, environment variables, config keys, API routes or endpoints that do not exist in the code, or exist with a different name, signature or default
 - install, build, test or run instructions that reference scripts, commands, files or versions that do not match the manifests
 - important public behaviour or configuration present in the code but missing from docs meant to describe it
@@ -55,11 +60,11 @@ Report doc-drift only where you can see a concrete mismatch, for example:
 Rules:
 1. Cite the documentation file and exact line numbers as "path", "start_line", "end_line". If the fix belongs in code instead, still cite the doc lines and list the code file in related_files.
 2. Always list the code or manifest files involved in related_files.
-3. Do not report tone, grammar or formatting. Do not guess when the outline does not show enough.
+3. Do not report tone, grammar, writing style or cosmetic formatting choices. Do not guess when the outline does not show enough.
 4. Severity: high = following the docs fails (wrong commands or APIs); medium = misleading details; low = minor omissions.
 
 Respond with JSON only:
-{"findings": [{"path": "README.md", "start_line": 40, "end_line": 44, "category": "doc-drift", "severity": "medium", "title": "Short summary", "description": "What the docs say versus what the code does", "related_files": ["src/cli.ts"]}]}"""
+{"findings": [{"path": "README.md", "start_line": 40, "end_line": 44, "category": "doc-drift or broken-code", "severity": "medium", "title": "Short summary", "description": "What the docs say versus what the code does", "related_files": ["src/cli.ts"]}]}"""
 
 
 def _file_tree(files: dict[str, FileInfo], limit: int = 3000) -> str:
@@ -75,7 +80,7 @@ def clean_path(value: object) -> str:
     return path.lstrip("/")
 
 
-def _parse(data: dict, allowed: dict[str, FileInfo], all_paths: set[str], source: str, force_category: str = "") -> list[Finding]:
+def _parse(data: dict, allowed: dict[str, FileInfo], all_paths: set[str], source: str, only_categories: tuple[str, ...] = ()) -> list[Finding]:
     out = []
     for item in data.get("findings") or []:
         if not isinstance(item, dict):
@@ -95,7 +100,7 @@ def _parse(data: dict, allowed: dict[str, FileInfo], all_paths: set[str], source
         out.append(
             Finding(
                 source=source,
-                category=force_category or norm_category(item.get("category")),
+                category=_category(item.get("category"), only_categories),
                 severity=norm_severity(item.get("severity")),
                 path=path,
                 start_line=start,
@@ -106,6 +111,13 @@ def _parse(data: dict, allowed: dict[str, FileInfo], all_paths: set[str], source
             )
         )
     return out
+
+
+def _category(value: object, only: tuple[str, ...]) -> str:
+    category = norm_category(value)
+    if only and category not in only:
+        return only[0]
+    return category
 
 
 def _batches(items: list[tuple[FileInfo, str]], budget: int) -> list[list[tuple[FileInfo, str, str]]]:
@@ -251,7 +263,7 @@ def analyze_docs(cfg: Config, files: dict[str, FileInfo], gemini, cache: Cache) 
             log.warning(errors[-1])
             continue
         batch_files = {f.path: f for f, _, _ in batch}
-        found = _parse(data, batch_files, all_paths, "docs", force_category="doc-drift")
+        found = _parse(data, batch_files, all_paths, "docs", only_categories=("doc-drift", "broken-code"))
         grouped: dict[str, list[dict]] = defaultdict(list)
         for finding in found:
             grouped[finding.path].append(finding.to_dict())

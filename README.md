@@ -25,6 +25,7 @@ An AI watchdog for GitHub repositories. It runs **only when you ask**: comment `
 | Vulnerable dependencies | OSV-Scanner on your lockfiles/manifests |
 | Documentation that no longer matches the code | Gemini docs pass (docs vs. code outline + manifests) → verification |
 | Broken links in Markdown | Deterministic link checker |
+| Markdown/HTML that breaks how a page renders (tags without a name, unclosed code blocks, unbalanced `<div>`/`<table>` tags) | Deterministic Markdown checker (free, no AI requests), plus the AI documentation check |
 | Build, CI and config problems | Gemini first pass → verification |
 
 Every finding lists **what's wrong, why it matters, the suggested change, the exact location, and the linked files that also need updating** (callers, implementations, tests, docs), found through an import graph that understands JavaScript/TypeScript (including Svelte, Vue, `$lib` and `@/` aliases), Python, Rust, Go, C/C++, Java/Kotlin, Ruby, PHP, Dart, CSS, HTML and Markdown links.
@@ -69,7 +70,7 @@ You do this once. Parts 1–3 create the action; Part 4 installs it into any rep
    ```bash
    python3 -m venv .venv && source .venv/bin/activate
    pip install -r requirements.txt pytest
-   PYTHONPATH=src pytest -q          # expect: 21 passed
+   PYTHONPATH=src pytest -q          # expect: 23 passed
    ```
 
 5. Push it:
@@ -386,6 +387,7 @@ src/overwatch/
   config.py                 inputs, event context, .overwatch.yml
   repo.py                   file discovery, languages, outlines
   depgraph.py               linked-file graph, broken-link checker
+  doclint.py                Markdown/HTML rendering checks
   scanners.py               Semgrep, Gitleaks, OSV-Scanner
   analyzer.py               Gemini first pass (code and docs)
   verifier.py               verification pass (Gemini or Claude) and fixes

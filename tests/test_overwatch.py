@@ -566,3 +566,42 @@ def test_overwatch_skips_its_own_workflow_and_config(tmp_path, monkeypatch):
     assert ".github/workflows/overwatch.yml" not in analyzed  # the workflow that runs Overwatch
     assert ".overwatch.yml" not in analyzed                   # Overwatch's own config
     assert ".github/workflows/ci.yml" in analyzed             # your other workflows are still checked
+
+
+def test_markdown_checker_finds_rendering_breakers_without_false_alarms():
+    from overwatch import doclint
+
+    def run(text):
+        return doclint.check({"README.md": FileInfo("README.md", text, "0", "markdown", True)})
+
+    [f] = run('<div align="center">\n\n< width="100%" src="https://x/banner.svg"/>\n\n</div>\n')
+    assert (f.start_line, f.rule_id) == (3, "markdown:nameless-html-tag")
+    assert f.edits == [{"path": "README.md", "old": '< width="100%" src="https://x/banner.svg"/>',
+                        "new": '<img width="100%" src="https://x/banner.svg"/>'}]
+
+    [f] = run("# Title\n\n```bash\nnpm test\n\nMore text\n")
+    assert (f.start_line, f.rule_id) == (3, "markdown:unclosed-code-fence")
+
+    [f] = run('<div align="center">\n<table><tr><td>x</td></tr></table>\n')
+    assert f.rule_id == "markdown:unbalanced-div"
+
+    clean = (
+        "<!-- < width='1' --> comment\n"
+        "Use `< width=\"1\">` inline.\n"
+        "```html\n< width=\"1\" src=\"x\">\n<div>\n```\n"
+        '<details><summary>More</summary>\n\n<img src="a.png"/>\n</details>\n'
+        '<div align="center"><br/></div>\n'
+    )
+    assert run(clean) == []
+
+
+def test_broken_readme_tag_gets_fixed_in_the_patch(tmp_path, monkeypatch):
+    files = dict(SAMPLE)
+    files["README.md"] = '<div align="center">\n\n< width="100%" src="https://x/banner.svg"/>\n\n</div>\n'
+    ws = make_repo(tmp_path / "repo", files)
+    cfg = load_cfg(ws, monkeypatch)
+    assert pipeline.main(cfg, gemini=FakeGeminiOnly()) == 0
+    report_md = (cfg.output_dir / "overwatch-report.md").read_text()
+    assert "HTML tag with no name in README.md" in report_md and "Markdown checker" in report_md
+    patch = (cfg.output_dir / "overwatch-fixes.patch").read_text()
+    assert '+<img width="100%" src="https://x/banner.svg"/>' in patch
