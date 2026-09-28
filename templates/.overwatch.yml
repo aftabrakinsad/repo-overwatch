@@ -1,0 +1,52 @@
+# Optional per-repository settings for Repo Overwatch. Put this file in the repository root.
+# Every key is optional; values here take priority over the workflow inputs.
+
+# Extra paths to skip (gitignore syntax). Dependencies, build output, lockfiles,
+# binaries and secret files (.env, *.pem, ...) are already skipped by default.
+exclude:
+  - "docs/generated/**"
+  - "**/*.snap"
+
+# Only analyze these paths (leave empty to analyze everything).
+include: []
+
+# Files to treat as documentation for the docs-vs-code check. By default every
+# Markdown/reStructuredText/AsciiDoc file and everything under docs/ is included.
+docs: []
+
+# Commands that must pass before a fix pull request is opened. They run on the
+# fix branch with the patches applied. Remember to set up the toolchain in the
+# workflow (for example actions/setup-node) before the Overwatch step.
+validate:
+  # - npm ci
+  # - npm test
+  # - cargo test
+
+# Lowest severity to report and file issues for: low, medium, high, critical.
+min_severity: low
+
+# Fail the workflow when a finding at or above this severity exists: none, low, medium, high, critical.
+fail_on: none
+
+# Maximum number of NEW issues opened per run. The rest are listed in the report.
+max_new_issues: 20
+
+fix_pr:
+  enabled: true
+  draft: false
+
+# AI models and free-tier limits (override the workflow inputs).
+# gemini_model: gemini-3.5-flash-lite   # free tier: higher daily quota than regular Flash
+# gemini_verify_model: ""               # e.g. gemini-3.5-flash for a stronger second pass, if your quota allows
+# verifier: auto                        # auto | gemini | claude (claude needs anthropic-api-key)
+# claude_model: claude-sonnet-5
+# gemini_rpm: 10                        # requests per minute per model; keep below your quota
+# gemini_tpm: 200000                    # tokens per minute per model (estimated)
+# max_ai_requests: 100                  # per scan; a scan that hits this resumes on the next command
+
+# Limits.
+max_file_bytes: 200000   # skip larger files
+max_files: 2000          # stop after this many files
+batch_chars: 250000      # characters of code per Gemini request
+concurrency: 2           # parallel AI requests
+semgrep_config: p/default

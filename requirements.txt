@@ -1,0 +1,5 @@
+google-genai>=1.30
+anthropic>=0.60
+requests>=2.31
+PyYAML>=6.0
+pathspec>=0.12

@@ -1,0 +1,55 @@
+# OPTIONAL: automatic mode. Scans on every push, pull request and new branch.
+# Costs more than the on-command workflow (overwatch.yml). Use one or the other, not both.
+# Replace YOUR-GITHUB-USERNAME below with the account that owns the repo-overwatch action.
+name: Repo Overwatch
+
+on:
+  push:
+    branches-ignore:
+      - "overwatch/**"   # never scan Overwatch's own fix branches
+  pull_request:
+  create:                # new branches (tags are ignored by the action)
+  workflow_dispatch:     # adds a "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write        # push the fix branch
+  issues: write          # open and update finding issues
+  pull-requests: write   # open the fix PR and comment on pull requests
+
+concurrency:
+  # One run per branch; a newer push cancels the older run.
+  group: overwatch-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  overwatch:
+    if: >-
+      !startsWith(github.head_ref || github.ref_name, 'overwatch/') &&
+      (github.event_name != 'create' || github.event.ref_type == 'branch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # On pull requests, check out the real branch (not the merge commit) so fixes can target it.
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.head_ref || github.ref }}
+
+      # Optional: set up the toolchain your `validate:` commands need, for example:
+      # - uses: actions/setup-node@v6
+      #   with:
+      #     node-version: 22
+
+      - uses: YOUR-GITHUB-USERNAME/repo-overwatch@v1
+        with:
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          # Optional: add an ANTHROPIC_API_KEY secret and uncomment to let Claude verify findings.
+          # anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Optional settings (defaults shown):
+          # gemini-model: gemini-3.5-flash-lite
+          # gemini-rpm: 10            # stay under your free-tier requests per minute
+          # max-ai-requests: 100      # per scan; the next scan continues where this one stopped
+          # min-severity: low
+          # max-new-issues: 20
+          # fail-on: none
+          # dry-run: false

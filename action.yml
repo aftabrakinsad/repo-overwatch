@@ -1,0 +1,166 @@
+name: "Repo Overwatch"
+description: "AI repository watchdog: Gemini analyzes, a verifier (Gemini or Claude) double-checks, and findings become a report, issues and a fix pull request."
+author: "your-username"
+branding:
+  icon: "eye"
+  color: "purple"
+
+inputs:
+  gemini-api-key:
+    description: "Google Gemini API key (first-pass analysis)."
+    required: true
+  anthropic-api-key:
+    description: "Optional Anthropic API key. When set, Claude verifies findings; otherwise a second Gemini pass does."
+    required: false
+    default: ""
+  github-token:
+    description: "Token for the GitHub API (issues, pull requests, comments)."
+    required: false
+    default: ${{ github.token }}
+  gemini-model:
+    description: "Gemini model ID used for the first pass (and for verification when no Anthropic key is set)."
+    required: false
+    default: "gemini-3.5-flash-lite"
+  gemini-verify-model:
+    description: "Optional different Gemini model for the verification pass (defaults to gemini-model)."
+    required: false
+    default: ""
+  verifier:
+    description: "Who verifies findings: auto (Claude if an Anthropic key is set, else Gemini), gemini, or claude."
+    required: false
+    default: "auto"
+  gemini-rpm:
+    description: "Maximum Gemini requests per minute per model (keep below your quota; 0 = unlimited)."
+    required: false
+    default: "10"
+  gemini-tpm:
+    description: "Maximum Gemini tokens per minute per model (estimated; 0 = unlimited)."
+    required: false
+    default: "200000"
+  max-ai-requests:
+    description: "Maximum AI requests in one scan. The scan stops cleanly at this limit and resumes next time (0 = unlimited)."
+    required: false
+    default: "100"
+  claude-model:
+    description: "Claude model ID used for verification and fixes."
+    required: false
+    default: "claude-sonnet-5"
+  branch:
+    description: "Branch being scanned. Defaults to the checked-out branch."
+    required: false
+    default: ""
+  config-path:
+    description: "Path to the per-repository config file."
+    required: false
+    default: ".overwatch.yml"
+  create-issues:
+    description: "Open or update one GitHub issue per finding."
+    required: false
+    default: "true"
+  create-fix-pr:
+    description: "Open or update a pull request with validated fixes."
+    required: false
+    default: "true"
+  max-new-issues:
+    description: "Maximum number of NEW issues opened per run (the rest are listed in the report)."
+    required: false
+    default: "20"
+  min-severity:
+    description: "Lowest severity to report: low, medium, high or critical."
+    required: false
+    default: "low"
+  fail-on:
+    description: "Fail the job if a finding at or above this severity exists: none, low, medium, high, critical."
+    required: false
+    default: "none"
+  dry-run:
+    description: "Analyze and write the report, but make no changes on GitHub."
+    required: false
+    default: "false"
+
+outputs:
+  findings-count:
+    description: "Number of reported findings."
+    value: ${{ steps.run.outputs.findings-count }}
+  report-path:
+    description: "Path of the Markdown report on the runner."
+    value: ${{ steps.run.outputs.report-path }}
+  fix-pr-url:
+    description: "URL of the fix pull request, if one was opened or updated."
+    value: ${{ steps.run.outputs.fix-pr-url }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+
+    - name: Cache scanner binaries
+      uses: actions/cache@v5
+      with:
+        path: ${{ runner.temp }}/overwatch-tools
+        key: overwatch-tools-${{ runner.os }}-${{ runner.arch }}-gitleaks8.30.1-osv2.3.8-r1
+
+    - name: Install scanners and Python dependencies
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        TOOLS_DIR: ${{ runner.temp }}/overwatch-tools
+      run: |
+        bash "$ACTION_PATH/scripts/install-tools.sh" "$TOOLS_DIR"
+        echo "$TOOLS_DIR/bin" >> "$GITHUB_PATH"
+        python -m pip install --quiet --disable-pip-version-check -r "$ACTION_PATH/requirements.txt"
+
+    - name: Restore analysis cache
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ runner.temp }}/overwatch-cache
+        key: overwatch-analysis-${{ github.repository }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          overwatch-analysis-${{ github.repository }}-
+
+    - name: Run Overwatch
+      id: run
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}/src
+        OVERWATCH_GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        OVERWATCH_ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        OVERWATCH_GITHUB_TOKEN: ${{ inputs.github-token }}
+        OVERWATCH_GEMINI_MODEL: ${{ inputs.gemini-model }}
+        OVERWATCH_CLAUDE_MODEL: ${{ inputs.claude-model }}
+        OVERWATCH_GEMINI_VERIFY_MODEL: ${{ inputs.gemini-verify-model }}
+        OVERWATCH_VERIFIER: ${{ inputs.verifier }}
+        OVERWATCH_GEMINI_RPM: ${{ inputs.gemini-rpm }}
+        OVERWATCH_GEMINI_TPM: ${{ inputs.gemini-tpm }}
+        OVERWATCH_MAX_AI_REQUESTS: ${{ inputs.max-ai-requests }}
+        OVERWATCH_BRANCH: ${{ inputs.branch }}
+        OVERWATCH_CONFIG_PATH: ${{ inputs.config-path }}
+        OVERWATCH_CREATE_ISSUES: ${{ inputs.create-issues }}
+        OVERWATCH_CREATE_FIX_PR: ${{ inputs.create-fix-pr }}
+        OVERWATCH_MAX_NEW_ISSUES: ${{ inputs.max-new-issues }}
+        OVERWATCH_MIN_SEVERITY: ${{ inputs.min-severity }}
+        OVERWATCH_FAIL_ON: ${{ inputs.fail-on }}
+        OVERWATCH_DRY_RUN: ${{ inputs.dry-run }}
+        OVERWATCH_CACHE_DIR: ${{ runner.temp }}/overwatch-cache
+        OVERWATCH_OUTPUT_DIR: ${{ runner.temp }}/overwatch-output
+      run: python -m overwatch --workspace "$GITHUB_WORKSPACE"
+
+    - name: Save analysis cache
+      # Always save, so work finished before a quota stop or a failure is not repeated.
+      if: always()
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ runner.temp }}/overwatch-cache
+        key: overwatch-analysis-${{ github.repository }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+    - name: Upload report artifact
+      if: always()
+      uses: actions/upload-artifact@v6
+      with:
+        name: overwatch-report-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/overwatch-output
+        if-no-files-found: ignore
+        retention-days: 30
